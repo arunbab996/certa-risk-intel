@@ -5,24 +5,24 @@ const OpenAI = require('openai');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- 1. MANUAL "NUCLEAR" CORS HEADERS ---
-// This middleware runs before anything else. 
-// It forces the browser to accept requests from ANY origin.
+// --- 1. "NUCLEAR" CONNECTION FIX (MANUAL HEADERS) ---
+// We manually force the browser to accept connections from ANYWHERE.
+// This bypasses the 'cors' package installation errors you saw in Railway.
 app.use((req, res, next) => {
-    // Allow any website to connect
+    // Allow any website (Vercel, localhost) to connect
     res.setHeader("Access-Control-Allow-Origin", "*");
     
-    // Allow any standard HTTP method
+    // Allow all standard HTTP methods
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
     
-    // Allow the headers Vercel sends
+    // Allow the specific headers Vercel sends
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
     
-    // Allow credentials (optional but good for stability)
+    // Allow credentials
     res.setHeader("Access-Control-Allow-Credentials", "true");
 
-    // ⚡️ INSTANTLY APPROVE PREFLIGHT CHECKS
-    // When the browser asks "Can I connect?", we say "YES" (200 OK) immediately.
+    // ⚡️ HANDLE PREFLIGHT (OPTIONS) REQUESTS INSTANTLY
+    // This solves the "Response to preflight request doesn't pass access control check" error.
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
@@ -32,10 +32,10 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
-// --- 2. CONFIGURATION ---
+// --- 2. CONFIGURATION & SAFETY CHECKS ---
 const apiKey = process.env.OPENAI_API_KEY;
-// Safety check to prevent crash if key is missing
-const openai = new OpenAI({ apiKey: apiKey || "dummy-key" }); 
+// Initialize OpenAI with a dummy key fallback to prevent crash on startup
+const openai = new OpenAI({ apiKey: apiKey || "dummy-key-for-build" }); 
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 // --- 3. GLOBAL DATA & HELPERS ---
@@ -48,6 +48,7 @@ const TRUSTED_DOMAINS = [
     'ndtv.com', 'thehindu.com', 'scmp.com', 'straitstimes.com', 'nikkei.com', 'aljazeera.com'
 ].join(',');
 
+// Mock History Log
 const auditLog = [
     { id: 1, timestamp: new Date(Date.now() - 86400000).toISOString(), user: "Gavin Belson", action: "Dismiss", query: "Pied Piper", reason: "False Positive", articleUrl: "http://techcrunch.com/pied-piper" },
     { id: 2, timestamp: new Date(Date.now() - 172800000).toISOString(), user: "Gavin Belson", action: "Confirm", query: "Hooli", reason: "Regulatory Fine", articleUrl: "http://reuters.com/hooli-fine" }
@@ -62,11 +63,11 @@ const getSourceType = (domain) => {
 
 // --- 4. FEATURE ENGINES ---
 
-// A. Entity Graph
+// A. Entity Graph (Network Logic)
 const getDynamicRelatedEntities = async (query) => {
-    const q = query.toLowerCase();
+    const q = (query || "").toLowerCase();
     
-    // HARDCODED DEMO DATA
+    // HARDCODED DEMO DATA (Fast & Reliable)
     if (q.includes('waymo')) return [{ name: "Tekedra Mawakana", role: "CEO" }, { name: "Dmitri Dolgov", role: "Co-CEO" }];
     if (q.includes('openai')) return [{ name: "Sam Altman", role: "CEO" }, { name: "Greg Brockman", role: "President" }];
     if (q.includes('anthropic')) return [{ name: "Dario Amodei", role: "CEO" }, { name: "Daniela Amodei", role: "President" }];
@@ -74,6 +75,7 @@ const getDynamicRelatedEntities = async (query) => {
     if (q.includes('musk') || q.includes('elon')) return [{ name: "Tesla", role: "CEO" }, { name: "SpaceX", role: "CEO/CTO" }];
     
     try {
+        if (!apiKey) return [];
         const completion = await openai.chat.completions.create({
             messages: [{ role: "user", content: `Identify the current CEO and one other key executive for "${query}". Return as JSON: [{"name": "X", "role": "Y"}]. Return ONLY JSON.` }],
             model: "gpt-3.5-turbo",
@@ -83,9 +85,9 @@ const getDynamicRelatedEntities = async (query) => {
     } catch (e) { return []; }
 };
 
-// B. History Engine
+// B. Risk History Engine
 const generateDynamicHistory = async (query) => {
-    const q = query.toLowerCase();
+    const q = (query || "").toLowerCase();
     
     if (q.includes('waymo')) return "In 2024, Waymo recalled 444 vehicles following a software error that led to crashes with towed items. In 2021, a trade secret dispute with Uber was settled for $245M in equity.";
     if (q.includes('openai')) return "The company faced a 2024 SEC probe regarding internal communications and governance during the 2023 CEO ouster. Multiple class-action lawsuits were filed in 2024 alleging copyright infringement in model training data.";
@@ -94,6 +96,7 @@ const generateDynamicHistory = async (query) => {
     if (q.includes('musk') || q.includes('elon')) return "In 2023, the SEC opened an investigation into the acquisition of Twitter regarding disclosure rules. Additionally, a 2018 settlement with the SEC regarding tweets resulted in a $20M fine and removal as Tesla Chairman.";
 
     try {
+        if (!apiKey) return "Historical data unavailable.";
         const prompt = `
         Act as a Risk Historian. 
         Search for major adverse events (fraud, lawsuits, fines) involving "${query}" from 2020-2025. 
@@ -111,9 +114,9 @@ const generateDynamicHistory = async (query) => {
     }
 };
 
-// C. Mock Tweets
+// C. Mock Tweets Engine
 const getMockTweets = (query) => {
-    const q = query.toLowerCase();
+    const q = (query || "").toLowerCase();
     if (q.includes('openai')) return [
         { handle: "@TechInsider", name: "Tech Daily", content: "Just got access to the new OpenAI model. The reasoning is insane, but is it safe? 🤔 #AI #Tech", date: "2h ago", sentiment: "neutral" },
         { handle: "@DevDude99", name: "Jason Dev", content: "OpenAI API down again? My production app is stalling. 😡 #coding #downtime", date: "5h ago", sentiment: "negative" },
@@ -140,9 +143,9 @@ const getMockTweets = (query) => {
     return [];
 };
 
-// D. Manual Injections (Fallback Data)
+// D. Manual Injections (Fallback / Demo Data)
 const getManualInjections = (query) => {
-    const q = query.toLowerCase();
+    const q = (query || "").toLowerCase();
     
     if (q.includes('musk') || q.includes('elon')) {
         return [
@@ -177,14 +180,14 @@ const getManualInjections = (query) => {
     return [];
 };
 
-// E. News Fetcher
+// E. News Fetcher (Robust)
 const fetchEliteNews = async (userQuery) => {
     try {
         const injections = getManualInjections(userQuery);
         
-        // Graceful fallback if NewsAPI key is missing
+        // If NewsAPI Key is missing, don't crash, just use injections.
         if (!NEWS_API_KEY) {
-            console.log("NewsAPI Key missing, using manual injections.");
+            console.warn("NewsAPI Key missing. Returning injections only.");
             return injections;
         }
 
@@ -202,13 +205,13 @@ const fetchEliteNews = async (userQuery) => {
         
         return [...injections, ...realArticles];
     } catch (e) { 
-        // If fetch fails, return manual data so app doesn't break
         console.error("News API Error:", e.message);
+        // Fallback to manual injections if API fails
         return getManualInjections(userQuery); 
     }
 };
 
-// F. Executive Brief Generator
+// F. AI Executive Brief Generator
 const generateExecutiveBrief = async (articles, query, history) => {
     const adverseContent = articles.filter(a => a.analysis.isAdverse).slice(0, 5).map(a => `- ${a.title}`).join("\n");
     const hasHistory = history && !history.includes("no significant adverse history");
@@ -216,6 +219,8 @@ const generateExecutiveBrief = async (articles, query, history) => {
     if (!adverseContent && !hasHistory) return "No significant adverse media detected in current scan or 5-year lookback.";
 
     try {
+        if (!apiKey) return "AI Briefing unavailable (Missing Key).";
+        
         const prompt = `
         Write a concise Executive Risk Brief for "${query}".
         CURRENT FINDINGS (Live Scan):
@@ -236,17 +241,17 @@ const generateExecutiveBrief = async (articles, query, history) => {
     } catch (e) { return "Briefing unavailable."; }
 };
 
-// G. Strict Compliance Analyzer
+// G. Strict Compliance Analyzer (The Core AI Logic)
 const analyzeBatch = async (items, query) => {
     if (!items || items.length === 0) return [];
     
-    // Limit to top 15 to prevent timeouts/costs
+    // Analyze top 15 items to save tokens and prevent timeout
     const criticalItems = items.slice(0, 15);
     
     const analyzeSingle = async (item) => {
         const lowerTitle = (item.title || '').toLowerCase();
         
-        // Deterministic Filter: Safe vs Risk
+        // 1. Deterministic Hard Filter (Save Costs & Speed)
         if ((lowerTitle.includes('ads') || lowerTitle.includes('advertising') || lowerTitle.includes('price') || lowerTitle.includes('subscription')) 
             && !lowerTitle.includes('lawsuit') && !lowerTitle.includes('sue') && !lowerTitle.includes('fine')) {
             return { ...item, analysis: { isRelevant: true, isAdverse: false, riskTypes: [], severity: "None", riskScore: 0, summary: "Business operational update (Ads/Pricing).", sourceLanguage: "en" } };
@@ -256,7 +261,14 @@ const analyzeBatch = async (items, query) => {
              return { ...item, analysis: { isRelevant: false, isAdverse: false, riskTypes: [], severity: "None", riskScore: 0, summary: "Irrelevant competitor news.", sourceLanguage: "en" } };
         }
         
+        // 2. AI Analysis
         try {
+            if (!apiKey) {
+                // Mock Analysis if no key
+                const isAdverse = lowerTitle.includes('sue') || lowerTitle.includes('fine') || lowerTitle.includes('probe');
+                return { ...item, analysis: { isRelevant: true, isAdverse, riskTypes: isAdverse ? ["Regulatory"] : [], severity: isAdverse ? "High" : "None", riskScore: isAdverse ? 80 : 10, summary: "Automated analysis (No AI Key).", sourceLanguage: "en", risk_event_slug: item.title } };
+            }
+
             const prompt = `
             You are a Strict Compliance Officer. Analyze regarding Target: "${query}".
             Article: "${item.title}. ${item.content}"
@@ -295,19 +307,21 @@ const analyzeBatch = async (items, query) => {
     return results.filter(r => r !== null && r.analysis && r.analysis.isRelevant === true);
 };
 
-// H. Deduplication
+// H. Deduplication Engine
 const deduplicateResults = (results) => {
     const clustered = new Map();
 
     results.forEach(item => {
         const slug = item.analysis.risk_event_slug || item.title;
+        // Normalize key to avoid duplicates like "OpenAI Lawsuit" vs "openai lawsuit"
         const key = slug.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 
         if (clustered.has(key)) {
             const existing = clustered.get(key);
             existing.relatedSources = existing.relatedSources || [];
             existing.relatedSources.push({ source: item.source, domain: item.domain, url: item.url, title: item.title });
-            // Prioritize Adverse Findings
+            
+            // Prioritize Adverse Findings: If the NEW item is riskier, swap it to the front
             if (item.analysis.isAdverse && !existing.analysis.isAdverse) {
                  item.relatedSources = existing.relatedSources; 
                  clustered.set(key, item);
@@ -321,14 +335,14 @@ const deduplicateResults = (results) => {
     return Array.from(clustered.values());
 };
 
-// --- 5. ROUTES ---
+// --- 5. API ROUTES ---
 
 // Health Check
 app.get('/', (req, res) => {
     res.send('✅ Certa Risk Backend is Online & CORS is Manually Unlocked!');
 });
 
-// Scan Endpoint
+// Main Scan Endpoint
 app.post('/api/scan', async (req, res) => {
     try {
         const { query } = req.body; 
@@ -336,6 +350,7 @@ app.post('/api/scan', async (req, res) => {
         
         console.log(`🔎 Scanning for: ${query}`);
 
+        // Parallel Fetching for speed
         const [rawContent, related, history, tweets] = await Promise.all([
             fetchEliteNews(query),
             getDynamicRelatedEntities(query),
@@ -343,7 +358,7 @@ app.post('/api/scan', async (req, res) => {
             Promise.resolve(getMockTweets(query))
         ]);
         
-        // Remove duplicate URLs
+        // Remove duplicate URLs before AI analysis
         const seen = new Set();
         const uniqueContent = rawContent.filter(item => {
             if (seen.has(item.url)) return false;
@@ -351,10 +366,12 @@ app.post('/api/scan', async (req, res) => {
             return true;
         });
         
+        // If no content found
         if (uniqueContent.length === 0) {
             return res.json({ message: "No data found.", data: [], related, brief: "No recent news found.", tweets });
         }
         
+        // Analyze and Cluster
         const rawResults = await analyzeBatch(uniqueContent, query);
         const clusteredResults = deduplicateResults(rawResults);
         const brief = await generateExecutiveBrief(clusteredResults, query, history);
