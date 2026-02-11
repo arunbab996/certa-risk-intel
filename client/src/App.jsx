@@ -9,7 +9,7 @@ import gavinPic from './assets/gavin.jpg';
 
 // --- CONFIGURATION ---
 // ⚠️ IMPORTANT: Replace this with your actual Render URL (keep /api at the end)
-const API_BASE = 'https://certa-risk-intel-production.up.railway.app/api';
+const API_BASE = '/api';
 
 // --- HELPER COMPONENTS ---
 

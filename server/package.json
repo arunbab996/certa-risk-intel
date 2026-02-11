@@ -1,7 +1,6 @@
 {
   "name": "certa-risk-backend",
   "version": "1.0.0",
-  "description": "Backend API for Certa Risk Intelligence",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
