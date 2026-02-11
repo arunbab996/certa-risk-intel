@@ -1,19 +1,22 @@
 {
-  "name": "server",
+  "name": "certa-risk-backend",
   "version": "1.0.0",
-  "description": "",
+  "description": "Backend API for Certa Risk Intelligence",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node index.js",
+    "dev": "node index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "cors": "^2.8.6",
-    "dotenv": "^17.2.4",
-    "express": "^5.2.1",
-    "openai": "^6.19.0"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "openai": "^4.28.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
