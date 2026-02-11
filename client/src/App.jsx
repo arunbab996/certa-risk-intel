@@ -186,7 +186,7 @@ export default function App() {
       setTweets(data?.tweets || []); 
     } catch (err) { 
         console.error("Fetch Error:", err);
-        alert("Connection Error. Ensure Render backend is live."); 
+        alert("Connection Error. Ensure Backend is live on Railway."); 
     } finally { 
         setLoading(false); 
     }
@@ -278,7 +278,7 @@ export default function App() {
     );
   }
 
-  // --- RENDER DASHBOARD ---
+  // --- i DASHBOARD ---
   return (
     <div className="flex min-h-screen bg-slate-50 font-sans text-slate-900 selection:bg-blue-100">
       <AuditModal isOpen={modalOpen} onClose={() => setModalOpen(false)} onConfirm={submitAudit} type={actionType} />
