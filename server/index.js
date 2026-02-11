@@ -1,30 +1,41 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const OpenAI = require('openai');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- 1. NUCLEAR CORS CONFIGURATION (THE FIX) ---
-// We use the 'cors' package with a wildcard to allow connections from ANYWHERE.
-app.use(cors({
-    origin: '*', 
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-}));
+// --- 1. MANUAL "NUCLEAR" CORS HEADERS ---
+// This middleware runs before anything else. 
+// It forces the browser to accept requests from ANY origin.
+app.use((req, res, next) => {
+    // Allow any website to connect
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    
+    // Allow any standard HTTP method
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
+    
+    // Allow the headers Vercel sends
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    
+    // Allow credentials (optional but good for stability)
+    res.setHeader("Access-Control-Allow-Credentials", "true");
 
-// Handle Preflight (OPTIONS) requests explicitly for safety
-app.options('*', cors()); 
+    // ⚡️ INSTANTLY APPROVE PREFLIGHT CHECKS
+    // When the browser asks "Can I connect?", we say "YES" (200 OK) immediately.
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    
+    next();
+});
 
 app.use(express.json());
 
 // --- 2. CONFIGURATION ---
 const apiKey = process.env.OPENAI_API_KEY;
-if (!apiKey) {
-    console.warn("⚠️ WARNING: OPENAI_API_KEY is missing. AI features will fail.");
-}
-const openai = new OpenAI({ apiKey: apiKey || "dummy-key" }); // Prevent crash on startup
+// Safety check to prevent crash if key is missing
+const openai = new OpenAI({ apiKey: apiKey || "dummy-key" }); 
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
 // --- 3. GLOBAL DATA & HELPERS ---
@@ -178,6 +189,8 @@ const fetchEliteNews = async (userQuery) => {
         }
 
         const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(userQuery)}&domains=${TRUSTED_DOMAINS}&sortBy=publishedAt&pageSize=40&apiKey=${NEWS_API_KEY}`;
+        
+        // Use Node 18+ native fetch
         const response = await fetch(url);
         const data = await response.json();
         
@@ -310,9 +323,9 @@ const deduplicateResults = (results) => {
 
 // --- 5. ROUTES ---
 
-// Health Check (Use this to verify Railway is online)
+// Health Check
 app.get('/', (req, res) => {
-    res.send('✅ Certa Risk Backend is Online & CORS is Fixed!');
+    res.send('✅ Certa Risk Backend is Online & CORS is Manually Unlocked!');
 });
 
 // Scan Endpoint
@@ -330,7 +343,7 @@ app.post('/api/scan', async (req, res) => {
             Promise.resolve(getMockTweets(query))
         ]);
         
-        // Remove duplicate URLs before AI analysis
+        // Remove duplicate URLs
         const seen = new Set();
         const uniqueContent = rawContent.filter(item => {
             if (seen.has(item.url)) return false;
@@ -338,7 +351,6 @@ app.post('/api/scan', async (req, res) => {
             return true;
         });
         
-        // Fallback if no content found
         if (uniqueContent.length === 0) {
             return res.json({ message: "No data found.", data: [], related, brief: "No recent news found.", tweets });
         }
