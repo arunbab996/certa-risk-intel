@@ -9,7 +9,7 @@ import gavinPic from './assets/gavin.jpg';
 
 // --- CONFIGURATION ---
 // ⚠️ IMPORTANT: Replace this with your actual Render URL (keep /api at the end)
-const API_BASE = 'https://certa-risk-intel-production.up.railway.app/api';
+const API_BASE = "https://certa-risk-intel-production.up.railway.app/api";
 
 // --- HELPER COMPONENTS ---
 
@@ -195,14 +195,22 @@ export default function App() {
   const openAuditModal = (item, type) => { setSelectedItem(item); setActionType(type); setModalOpen(true); };
 
   const submitAudit = async (reason) => {
-      await fetch(`${API_BASE}/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ articleUrl: selectedItem?.url, action: actionType, reason, user: "Gavin Belson", query: query })
-      });
-      setDecisions(prev => ({ ...prev, [selectedItem?.url]: actionType }));
-      setModalOpen(false);
-  };
+  await fetch(`${API_BASE}/action`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      articleUrl: selectedItem?.url,
+      action: actionType,
+      reason,
+      user: "Gavin Belson",
+      query
+    })
+  });
+
+  setDecisions(prev => ({ ...prev, [selectedItem?.url]: actionType }));
+  setModalOpen(false);
+};
+
 
   const adverseCount = (results || []).filter(r => r?.analysis?.isAdverse).length;
   const displayResults = activeTab === 'adverse' ? (results || []).filter(r => r?.analysis?.isAdverse) : (results || []);

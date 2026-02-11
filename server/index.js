@@ -5,60 +5,62 @@ const OpenAI = require('openai');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// --- 1. "NUCLEAR" CONNECTION FIX (MANUAL HEADERS) ---
-// We manually force the browser to accept connections from ANYWHERE.
-// This bypasses the 'cors' package installation errors you saw in Railway.
+/* =====================================================
+   🚨 GLOBAL CORS + PREFLIGHT HANDLER (MUST BE FIRST)
+   ===================================================== */
 app.use((req, res, next) => {
-    // Allow any website (Vercel, localhost) to connect
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    
-    // Allow all standard HTTP methods
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH");
-    
-    // Allow the specific headers Vercel sends
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-    
-    // Allow credentials
-    res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With"
+  );
 
-    // ⚡️ HANDLE PREFLIGHT (OPTIONS) REQUESTS INSTANTLY
-    // This solves the "Response to preflight request doesn't pass access control check" error.
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    
-    next();
+  // ⚡ Instant preflight response
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+
+  next();
 });
 
+/* =====================================================
+   BODY PARSER (ONLY AFTER CORS)
+   ===================================================== */
 app.use(express.json());
 
-// --- 2. CONFIGURATION & SAFETY CHECKS ---
+/* =====================================================
+   CONFIGURATION & SAFETY CHECKS
+   ===================================================== */
 const apiKey = process.env.OPENAI_API_KEY;
-// Initialize OpenAI with a dummy key fallback to prevent crash on startup
-const openai = new OpenAI({ apiKey: apiKey || "dummy-key-for-build" }); 
+const openai = new OpenAI({ apiKey: apiKey || "dummy-key-for-build" });
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
-// --- 3. GLOBAL DATA & HELPERS ---
+/* =====================================================
+   GLOBAL DATA & HELPERS
+   ===================================================== */
 const TRUSTED_DOMAINS = [
-    'reuters.com', 'bloomberg.com', 'wsj.com', 'ft.com', 'bbc.co.uk', 
-    'nytimes.com', 'washingtonpost.com', 'cnbc.com', 'law360.com', 'scotusblog.com',
-    'marketwatch.com', 'sec.gov', 'justice.gov', 'europa.eu', 'nhtsa.gov',
-    'techcrunch.com', 'wired.com', 'theverge.com', 'medium.com', 'substack.com',
-    'economictimes.indiatimes.com', 'timesofindia.indiatimes.com', 'livemint.com', 
-    'ndtv.com', 'thehindu.com', 'scmp.com', 'straitstimes.com', 'nikkei.com', 'aljazeera.com'
+  'reuters.com','bloomberg.com','wsj.com','ft.com','bbc.co.uk',
+  'nytimes.com','washingtonpost.com','cnbc.com','law360.com','scotusblog.com',
+  'marketwatch.com','sec.gov','justice.gov','europa.eu','nhtsa.gov',
+  'techcrunch.com','wired.com','theverge.com','medium.com','substack.com',
+  'economictimes.indiatimes.com','timesofindia.indiatimes.com','livemint.com',
+  'ndtv.com','thehindu.com','scmp.com','straitstimes.com','nikkei.com','aljazeera.com'
 ].join(',');
 
-// Mock History Log
 const auditLog = [
-    { id: 1, timestamp: new Date(Date.now() - 86400000).toISOString(), user: "Gavin Belson", action: "Dismiss", query: "Pied Piper", reason: "False Positive", articleUrl: "http://techcrunch.com/pied-piper" },
-    { id: 2, timestamp: new Date(Date.now() - 172800000).toISOString(), user: "Gavin Belson", action: "Confirm", query: "Hooli", reason: "Regulatory Fine", articleUrl: "http://reuters.com/hooli-fine" }
+  { id: 1, timestamp: new Date(Date.now() - 86400000).toISOString(), user: "Gavin Belson", action: "Dismiss", query: "Pied Piper", reason: "False Positive", articleUrl: "http://techcrunch.com/pied-piper" },
+  { id: 2, timestamp: new Date(Date.now() - 172800000).toISOString(), user: "Gavin Belson", action: "Confirm", query: "Hooli", reason: "Regulatory Fine", articleUrl: "http://reuters.com/hooli-fine" }
 ];
 
 const getSourceType = (domain) => {
-    if (domain.includes('gov') || domain.includes('europa') || domain.includes('sec') || domain.includes('nhtsa')) return 'Regulatory';
-    if (domain.includes('law') || domain.includes('court') || domain.includes('justice') || domain.includes('justia') || domain.includes('supremecourt')) return 'Legal';
-    if (domain.includes('blog') || domain.includes('medium') || domain.includes('reddit') || domain.includes('glassdoor')) return 'Blog';
-    return 'News';
+  if (domain.includes('gov') || domain.includes('europa') || domain.includes('sec') || domain.includes('nhtsa')) return 'Regulatory';
+  if (domain.includes('law') || domain.includes('court') || domain.includes('justice')) return 'Legal';
+  if (domain.includes('blog') || domain.includes('medium') || domain.includes('reddit')) return 'Blog';
+  return 'News';
 };
 
 // --- 4. FEATURE ENGINES ---
@@ -335,61 +337,75 @@ const deduplicateResults = (results) => {
     return Array.from(clustered.values());
 };
 
-// --- 5. API ROUTES ---
+/* =====================================================
+   API ROUTES
+   ===================================================== */
 
-// Health Check
 app.get('/', (req, res) => {
-    res.send('✅ Certa Risk Backend is Online & CORS is Manually Unlocked!');
+  res.send('✅ Certa Risk Backend is Online & CORS is Unlocked');
 });
 
-// Main Scan Endpoint
 app.post('/api/scan', async (req, res) => {
-    try {
-        const { query } = req.body; 
-        if (!query) return res.status(400).json({ message: "Query required" });
-        
-        console.log(`🔎 Scanning for: ${query}`);
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ message: "Query required" });
 
-        // Parallel Fetching for speed
-        const [rawContent, related, history, tweets] = await Promise.all([
-            fetchEliteNews(query),
-            getDynamicRelatedEntities(query),
-            generateDynamicHistory(query),
-            Promise.resolve(getMockTweets(query))
-        ]);
-        
-        // Remove duplicate URLs before AI analysis
-        const seen = new Set();
-        const uniqueContent = rawContent.filter(item => {
-            if (seen.has(item.url)) return false;
-            seen.add(item.url);
-            return true;
-        });
-        
-        // If no content found
-        if (uniqueContent.length === 0) {
-            return res.json({ message: "No data found.", data: [], related, brief: "No recent news found.", tweets });
-        }
-        
-        // Analyze and Cluster
-        const rawResults = await analyzeBatch(uniqueContent, query);
-        const clusteredResults = deduplicateResults(rawResults);
-        const brief = await generateExecutiveBrief(clusteredResults, query, history);
+    console.log(`🔎 Scanning for: ${query}`);
 
-        res.json({ message: `Success`, data: clusteredResults, related, brief, tweets });
-    } catch (error) { 
-        console.error("SCAN ERROR:", error);
-        res.status(500).json({ message: "Internal Server Error", data: [] }); 
+    const [rawContent, related, history, tweets] = await Promise.all([
+      fetchEliteNews(query),
+      getDynamicRelatedEntities(query),
+      generateDynamicHistory(query),
+      Promise.resolve(getMockTweets(query))
+    ]);
+
+    const seen = new Set();
+    const uniqueContent = rawContent.filter(item => {
+      if (seen.has(item.url)) return false;
+      seen.add(item.url);
+      return true;
+    });
+
+    if (uniqueContent.length === 0) {
+      return res.json({
+        message: "No data found.",
+        data: [],
+        related,
+        brief: "No recent news found.",
+        tweets
+      });
     }
+
+    const rawResults = await analyzeBatch(uniqueContent, query);
+    const clusteredResults = deduplicateResults(rawResults);
+    const brief = await generateExecutiveBrief(clusteredResults, query, history);
+
+    res.json({
+      message: "Success",
+      data: clusteredResults,
+      related,
+      brief,
+      tweets
+    });
+  } catch (error) {
+    console.error("SCAN ERROR:", error);
+    res.status(500).json({ message: "Internal Server Error", data: [] });
+  }
 });
 
-// Audit Action Endpoint
 app.post('/api/action', (req, res) => {
-    auditLog.unshift({ ...req.body, id: Date.now(), timestamp: new Date().toISOString() });
-    res.json({ success: true });
+  auditLog.unshift({
+    ...req.body,
+    id: Date.now(),
+    timestamp: new Date().toISOString()
+  });
+  res.json({ success: true });
 });
 
-// History Endpoint
-app.get('/api/history', (req, res) => res.json(auditLog));
+app.get('/api/history', (req, res) => {
+  res.json(auditLog);
+});
 
-app.listen(PORT, () => console.log(`🚀 Certa Engine running on port ${PORT}`));
+app.listen(PORT, () =>
+  console.log(`🚀 Certa Engine running on port ${PORT}`)
+);
