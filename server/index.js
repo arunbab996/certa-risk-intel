@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const OpenAI = require('openai');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
