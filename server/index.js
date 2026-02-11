@@ -10,9 +10,15 @@ app.get("/", (req, res) => {
 });
 
 app.post("/api/scan", (req, res) => {
+  const { query } = req.body || {};
+
   res.json({
-    message: "Scan endpoint reached",
-    query: req.body?.query || null
+    message: "Scan working",
+    query,
+    data: [],
+    related: [],
+    brief: "Demo response from backend",
+    tweets: []
   });
 });
 
