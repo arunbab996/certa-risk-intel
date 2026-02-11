@@ -1,18 +1,36 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const OpenAI = require('openai');
 
+// --- CONFIGURATION ---
 const app = express();
-app.use(cors({
-    origin: '*', // This tells the browser "Allow ANY website to talk to me"
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type']
-}));
-app.use(express.json());
+const PORT = process.env.PORT || 3001;
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Initialize OpenAI with a safety check
+const apiKey = process.env.OPENAI_API_KEY;
+if (!apiKey) {
+    console.error("❌ FATAL ERROR: OPENAI_API_KEY is missing in .env file.");
+    process.exit(1);
+}
+const openai = new OpenAI({ apiKey: apiKey });
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
+
+// --- 1. FORCE-OPEN CORS MIDDLEWARE ---
+// This manually forces the browser to accept requests from ANYWHERE.
+// It is more robust than the standard 'cors' package for prototypes.
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*"); 
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
+    
+    // Handle the browser's "Preflight" check instantly
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+    }
+    next();
+});
+
+app.use(express.json());
 
 // --- GLOBAL SOURCES ---
 const TRUSTED_DOMAINS = [
@@ -36,11 +54,11 @@ const getSourceType = (domain) => {
     return 'News';
 };
 
-// --- 1. AI ENTITY GRAPH ---
+// --- 2. AI ENTITY GRAPH ---
 const getDynamicRelatedEntities = async (query) => {
     const q = query.toLowerCase();
     
-    // HARDCODED DEMO DATA
+    // HARDCODED DEMO DATA (For reliability during demos)
     if (q.includes('waymo')) return [{ name: "Tekedra Mawakana", role: "CEO" }, { name: "Dmitri Dolgov", role: "Co-CEO" }];
     if (q.includes('openai')) return [{ name: "Sam Altman", role: "CEO" }, { name: "Greg Brockman", role: "President" }];
     if (q.includes('anthropic')) return [{ name: "Dario Amodei", role: "CEO" }, { name: "Daniela Amodei", role: "President" }];
@@ -57,7 +75,7 @@ const getDynamicRelatedEntities = async (query) => {
     } catch (e) { return []; }
 };
 
-// --- 2. HYBRID HISTORY ENGINE ---
+// --- 3. HYBRID HISTORY ENGINE ---
 const generateDynamicHistory = async (query) => {
     const q = query.toLowerCase();
     
@@ -85,7 +103,7 @@ const generateDynamicHistory = async (query) => {
     }
 };
 
-// --- 3. MOCK TWEETS ENGINE (New) ---
+// --- 4. MOCK TWEETS ENGINE ---
 const getMockTweets = (query) => {
     const q = query.toLowerCase();
     if (q.includes('openai')) return [
@@ -114,7 +132,7 @@ const getMockTweets = (query) => {
     return [];
 };
 
-// --- 4. MANUAL INJECTIONS ---
+// --- 5. MANUAL INJECTIONS ---
 const getManualInjections = (query) => {
     const q = query.toLowerCase();
     
@@ -154,18 +172,32 @@ const getManualInjections = (query) => {
 const fetchEliteNews = async (userQuery) => {
     try {
         const injections = getManualInjections(userQuery);
+        // Ensure we handle missing API keys gracefully for testing
+        if (!NEWS_API_KEY) {
+            console.warn("NewsAPI Key missing. Returning injections only.");
+            return injections;
+        }
+
         const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(userQuery)}&domains=${TRUSTED_DOMAINS}&sortBy=publishedAt&pageSize=40&apiKey=${NEWS_API_KEY}`;
+        
+        // Use Node 18+ native fetch
         const response = await fetch(url);
         const data = await response.json();
-        const realArticles = data.status === 'ok' ? data.articles.map(a => ({ 
+        
+        const realArticles = (data.status === 'ok' && Array.isArray(data.articles)) ? data.articles.map(a => ({ 
             type: 'news', url: a.url, title: a.title, content: a.description || a.title, 
             source: a.source.name, domain: new URL(a.url).hostname.replace('www.', ''), 
             date: a.publishedAt, manualLanguage: null, sourceType: getSourceType(new URL(a.url).hostname) 
         })) : [];
+        
         return [...injections, ...realArticles];
-    } catch (e) { return getManualInjections(userQuery); }
+    } catch (e) { 
+        console.error("News Fetch Error (falling back to manual):", e.message);
+        return getManualInjections(userQuery); 
+    }
 };
 
+// --- 6. AI SUMMARIZER ---
 const generateExecutiveBrief = async (articles, query, history) => {
     const adverseContent = articles.filter(a => a.analysis.isAdverse).slice(0, 5).map(a => `- ${a.title}`).join("\n");
     const hasHistory = history && !history.includes("no significant adverse history");
@@ -193,12 +225,17 @@ const generateExecutiveBrief = async (articles, query, history) => {
     } catch (e) { return "Briefing unavailable."; }
 };
 
-// --- STRICT ANALYZER ---
+// --- 7. STRICT ANALYZER ---
 const analyzeBatch = async (items, query) => {
+    if (!items || items.length === 0) return [];
+
+    // Analyze top 15 items to save tokens
     const criticalItems = items.slice(0, 15);
+    
     const analyzeSingle = async (item) => {
-        const lowerTitle = item.title.toLowerCase();
+        const lowerTitle = (item.title || "").toLowerCase();
         
+        // --- Deterministic Filtering (Save Costs) ---
         if ((lowerTitle.includes('ads') || lowerTitle.includes('advertising') || lowerTitle.includes('price') || lowerTitle.includes('subscription')) 
             && !lowerTitle.includes('lawsuit') && !lowerTitle.includes('sue') && !lowerTitle.includes('fine')) {
             return { ...item, analysis: { isRelevant: true, isAdverse: false, riskTypes: [], severity: "None", riskScore: 0, summary: "Business operational update (Ads/Pricing).", sourceLanguage: "en" } };
@@ -244,7 +281,7 @@ const analyzeBatch = async (items, query) => {
             `;
             const completion = await openai.chat.completions.create({
                 messages: [{ role: "user", content: prompt }],
-                model: "gpt-3.5-turbo-1106",
+                model: "gpt-3.5-turbo", // Standard model is sufficient
                 response_format: { type: "json_object" },
                 temperature: 0
             });
@@ -255,21 +292,27 @@ const analyzeBatch = async (items, query) => {
     };
     
     const results = await Promise.all(criticalItems.map(analyzeSingle));
-    return results.filter(r => r !== null && r.analysis.isRelevant === true);
+    return results.filter(r => r !== null && r.analysis && r.analysis.isRelevant === true);
 };
 
-// --- DEDUPLICATION ENGINE ---
+// --- 8. DEDUPLICATION ENGINE ---
 const deduplicateResults = (results) => {
     const clustered = new Map();
 
     results.forEach(item => {
         const slug = item.analysis.risk_event_slug || item.title;
+        // Normalize key to avoid duplicates like "OpenAI Lawsuit" vs "openai lawsuit"
         const key = slug.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 
         if (clustered.has(key)) {
             const existing = clustered.get(key);
+            
+            // Merge source lists
             existing.relatedSources = existing.relatedSources || [];
             existing.relatedSources.push({ source: item.source, domain: item.domain, url: item.url, title: item.title });
+            
+            // If the NEW item is adverse and the EXISTING one wasn't, swap them
+            // This ensures we always show the "Risk" version of a story if multiple exist
             if (item.analysis.isAdverse && !existing.analysis.isAdverse) {
                  item.relatedSources = existing.relatedSources; 
                  clustered.set(key, item);
@@ -283,18 +326,28 @@ const deduplicateResults = (results) => {
     return Array.from(clustered.values());
 };
 
+// --- ROUTES ---
+
+app.get('/', (req, res) => {
+    res.send('✅ Certa Risk Backend is Online & Unlocked!');
+});
+
 app.post('/api/scan', async (req, res) => {
     try {
         const { query } = req.body; 
         if (!query) return res.status(400).json({ message: "Query required" });
+        
+        console.log(`🔎 Scanning for: ${query}`);
 
-        const rawContent = await fetchEliteNews(query);
-        const [related, history, tweets] = await Promise.all([
-            getDynamicRelatedEntities(query), 
+        // Parallel Fetching for speed
+        const [rawContent, related, history, tweets] = await Promise.all([
+            fetchEliteNews(query),
+            getDynamicRelatedEntities(query),
             generateDynamicHistory(query),
-            Promise.resolve(getMockTweets(query)) // Add Tweets to parallel fetch
+            Promise.resolve(getMockTweets(query))
         ]);
         
+        // Basic dedup by URL before sending to AI (save tokens)
         const seen = new Set();
         const uniqueContent = rawContent.filter(item => {
             if (seen.has(item.url)) return false;
@@ -302,16 +355,21 @@ app.post('/api/scan', async (req, res) => {
             return true;
         });
         
-        if (uniqueContent.length === 0) return res.json({ message: "No data found.", data: [], related, brief: "No data." });
+        if (uniqueContent.length === 0) {
+            return res.json({ message: "No data found.", data: [], related, brief: "No recent news found.", tweets });
+        }
         
+        // Analyze and Cluster
         const rawResults = await analyzeBatch(uniqueContent, query);
         const clusteredResults = deduplicateResults(rawResults);
         const brief = await generateExecutiveBrief(clusteredResults, query, history);
 
+        console.log(`✅ Scan complete. Found ${clusteredResults.length} unique insights.`);
         res.json({ message: `Scanned items.`, data: clusteredResults, related, brief, tweets });
+
     } catch (error) { 
-        console.error(error);
-        res.status(500).json({ message: "Error", data: [] }); 
+        console.error("🔥 SCAN ERROR:", error);
+        res.status(500).json({ message: "Internal Server Error", data: [] }); 
     }
 });
 
@@ -321,5 +379,5 @@ app.post('/api/action', (req, res) => {
 });
 
 app.get('/api/history', (req, res) => res.json(auditLog));
-const PORT = process.env.PORT || 3001;
+
 app.listen(PORT, () => console.log(`🚀 Certa Engine running on port ${PORT}`));
