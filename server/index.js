@@ -1,40 +1,33 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const OpenAI = require('openai');
 
-// --- CONFIGURATION ---
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Initialize OpenAI with a safety check
-const apiKey = process.env.OPENAI_API_KEY;
-if (!apiKey) {
-    console.error("❌ FATAL ERROR: OPENAI_API_KEY is missing in .env file.");
-    // In production, we might want to fail hard, or just log it.
-}
-const openai = new OpenAI({ apiKey: apiKey });
-const NEWS_API_KEY = process.env.NEWS_API_KEY;
+// --- 1. NUCLEAR CORS CONFIGURATION (THE FIX) ---
+// We use the 'cors' package with a wildcard to allow connections from ANYWHERE.
+app.use(cors({
+    origin: '*', 
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
 
-// --- 1. FORCE-OPEN CORS MIDDLEWARE (THE FIX) ---
-// This manually forces the browser to accept requests from ANYWHERE.
-app.use((req, res, next) => {
-    // Allow any origin
-    res.header("Access-Control-Allow-Origin", "*");
-    // Allow these specific methods
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    // Allow these specific headers
-    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
-    
-    // ⚡️ HANDLE PREFLIGHT REQUESTS INSTANTLY
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
-});
+// Handle Preflight (OPTIONS) requests explicitly for safety
+app.options('*', cors()); 
 
 app.use(express.json());
 
-// --- GLOBAL SOURCES ---
+// --- 2. CONFIGURATION ---
+const apiKey = process.env.OPENAI_API_KEY;
+if (!apiKey) {
+    console.warn("⚠️ WARNING: OPENAI_API_KEY is missing. AI features will fail.");
+}
+const openai = new OpenAI({ apiKey: apiKey || "dummy-key" }); // Prevent crash on startup
+const NEWS_API_KEY = process.env.NEWS_API_KEY;
+
+// --- 3. GLOBAL DATA & HELPERS ---
 const TRUSTED_DOMAINS = [
     'reuters.com', 'bloomberg.com', 'wsj.com', 'ft.com', 'bbc.co.uk', 
     'nytimes.com', 'washingtonpost.com', 'cnbc.com', 'law360.com', 'scotusblog.com',
@@ -56,11 +49,13 @@ const getSourceType = (domain) => {
     return 'News';
 };
 
-// --- 2. AI ENTITY GRAPH ---
+// --- 4. FEATURE ENGINES ---
+
+// A. Entity Graph
 const getDynamicRelatedEntities = async (query) => {
     const q = query.toLowerCase();
     
-    // HARDCODED DEMO DATA (For reliability during demos)
+    // HARDCODED DEMO DATA
     if (q.includes('waymo')) return [{ name: "Tekedra Mawakana", role: "CEO" }, { name: "Dmitri Dolgov", role: "Co-CEO" }];
     if (q.includes('openai')) return [{ name: "Sam Altman", role: "CEO" }, { name: "Greg Brockman", role: "President" }];
     if (q.includes('anthropic')) return [{ name: "Dario Amodei", role: "CEO" }, { name: "Daniela Amodei", role: "President" }];
@@ -77,7 +72,7 @@ const getDynamicRelatedEntities = async (query) => {
     } catch (e) { return []; }
 };
 
-// --- 3. HYBRID HISTORY ENGINE ---
+// B. History Engine
 const generateDynamicHistory = async (query) => {
     const q = query.toLowerCase();
     
@@ -105,7 +100,7 @@ const generateDynamicHistory = async (query) => {
     }
 };
 
-// --- 4. MOCK TWEETS ENGINE ---
+// C. Mock Tweets
 const getMockTweets = (query) => {
     const q = query.toLowerCase();
     if (q.includes('openai')) return [
@@ -134,7 +129,7 @@ const getMockTweets = (query) => {
     return [];
 };
 
-// --- 5. MANUAL INJECTIONS ---
+// D. Manual Injections (Fallback Data)
 const getManualInjections = (query) => {
     const q = query.toLowerCase();
     
@@ -171,18 +166,18 @@ const getManualInjections = (query) => {
     return [];
 };
 
+// E. News Fetcher
 const fetchEliteNews = async (userQuery) => {
     try {
         const injections = getManualInjections(userQuery);
-        // Ensure we handle missing API keys gracefully for testing
+        
+        // Graceful fallback if NewsAPI key is missing
         if (!NEWS_API_KEY) {
-            console.warn("NewsAPI Key missing. Returning injections only.");
+            console.log("NewsAPI Key missing, using manual injections.");
             return injections;
         }
 
         const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(userQuery)}&domains=${TRUSTED_DOMAINS}&sortBy=publishedAt&pageSize=40&apiKey=${NEWS_API_KEY}`;
-        
-        // Use Node 18+ native fetch
         const response = await fetch(url);
         const data = await response.json();
         
@@ -194,12 +189,13 @@ const fetchEliteNews = async (userQuery) => {
         
         return [...injections, ...realArticles];
     } catch (e) { 
-        console.error("News Fetch Error (falling back to manual):", e.message);
+        // If fetch fails, return manual data so app doesn't break
+        console.error("News API Error:", e.message);
         return getManualInjections(userQuery); 
     }
 };
 
-// --- 6. AI SUMMARIZER ---
+// F. Executive Brief Generator
 const generateExecutiveBrief = async (articles, query, history) => {
     const adverseContent = articles.filter(a => a.analysis.isAdverse).slice(0, 5).map(a => `- ${a.title}`).join("\n");
     const hasHistory = history && !history.includes("no significant adverse history");
@@ -227,17 +223,17 @@ const generateExecutiveBrief = async (articles, query, history) => {
     } catch (e) { return "Briefing unavailable."; }
 };
 
-// --- 7. STRICT ANALYZER ---
+// G. Strict Compliance Analyzer
 const analyzeBatch = async (items, query) => {
     if (!items || items.length === 0) return [];
-
-    // Analyze top 15 items to save tokens
+    
+    // Limit to top 15 to prevent timeouts/costs
     const criticalItems = items.slice(0, 15);
     
     const analyzeSingle = async (item) => {
-        const lowerTitle = (item.title || "").toLowerCase();
+        const lowerTitle = (item.title || '').toLowerCase();
         
-        // --- Deterministic Filtering (Save Costs) ---
+        // Deterministic Filter: Safe vs Risk
         if ((lowerTitle.includes('ads') || lowerTitle.includes('advertising') || lowerTitle.includes('price') || lowerTitle.includes('subscription')) 
             && !lowerTitle.includes('lawsuit') && !lowerTitle.includes('sue') && !lowerTitle.includes('fine')) {
             return { ...item, analysis: { isRelevant: true, isAdverse: false, riskTypes: [], severity: "None", riskScore: 0, summary: "Business operational update (Ads/Pricing).", sourceLanguage: "en" } };
@@ -253,22 +249,11 @@ const analyzeBatch = async (items, query) => {
             Article: "${item.title}. ${item.content}"
 
             TASK:
-            1. RELEVANCE CHECK:
-               - Is the article about "${query}"? (Competitor news is IRRELEVANT).
-               - If headline is about a different entity, explain connection.
-
-            2. ADVERSE CHECK (Strict Rules):
-               - LAWSUITS/FINES/PROBES -> isAdverse: TRUE.
-               - TRADEMARK/IP DISPUTES (e.g. "Abandons branding due to dispute") -> isAdverse: TRUE.
-               - FORCED CHANGES -> isAdverse: TRUE.
-               - SAFE: Stock moves, Product launches, Ads, Pricing.
-
-            3. SCORE & CATEGORIZE (Only if Adverse):
-               - Score 0-100.
-               - Categories: "Fraud or Financial Crime", "Litigation or Legal Disputes", "Environmental Violations", "Labor and Employment Issues", "Regulatory Enforcement", "Sanctions or Corruption".
-
-            4. DEDUPLICATION TAG:
-               - Create a "risk_event_slug" (e.g. "OpenAI io Trademark").
+            1. RELEVANCE CHECK: Is the article about "${query}"? (Competitor news is IRRELEVANT).
+            2. ADVERSE CHECK: Lawsuits, Fines, Probes, Disputes = TRUE. Stock moves, Ads = FALSE.
+            3. SCORE: 0-100.
+            4. CATEGORIZE: "Fraud", "Litigation", "Regulatory", "Sanctions", etc.
+            5. DEDUPLICATION TAG: Create a "risk_event_slug" (e.g. "OpenAI io Trademark").
 
             Return JSON: { 
                 "isRelevant": boolean, 
@@ -283,7 +268,7 @@ const analyzeBatch = async (items, query) => {
             `;
             const completion = await openai.chat.completions.create({
                 messages: [{ role: "user", content: prompt }],
-                model: "gpt-3.5-turbo", // Standard model is sufficient
+                model: "gpt-3.5-turbo",
                 response_format: { type: "json_object" },
                 temperature: 0
             });
@@ -297,24 +282,19 @@ const analyzeBatch = async (items, query) => {
     return results.filter(r => r !== null && r.analysis && r.analysis.isRelevant === true);
 };
 
-// --- 8. DEDUPLICATION ENGINE ---
+// H. Deduplication
 const deduplicateResults = (results) => {
     const clustered = new Map();
 
     results.forEach(item => {
         const slug = item.analysis.risk_event_slug || item.title;
-        // Normalize key to avoid duplicates like "OpenAI Lawsuit" vs "openai lawsuit"
         const key = slug.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
 
         if (clustered.has(key)) {
             const existing = clustered.get(key);
-            
-            // Merge source lists
             existing.relatedSources = existing.relatedSources || [];
             existing.relatedSources.push({ source: item.source, domain: item.domain, url: item.url, title: item.title });
-            
-            // If the NEW item is adverse and the EXISTING one wasn't, swap them
-            // This ensures we always show the "Risk" version of a story if multiple exist
+            // Prioritize Adverse Findings
             if (item.analysis.isAdverse && !existing.analysis.isAdverse) {
                  item.relatedSources = existing.relatedSources; 
                  clustered.set(key, item);
@@ -328,12 +308,14 @@ const deduplicateResults = (results) => {
     return Array.from(clustered.values());
 };
 
-// --- ROUTES ---
+// --- 5. ROUTES ---
 
+// Health Check (Use this to verify Railway is online)
 app.get('/', (req, res) => {
-    res.send('✅ Certa Risk Backend is Online & Unlocked!');
+    res.send('✅ Certa Risk Backend is Online & CORS is Fixed!');
 });
 
+// Scan Endpoint
 app.post('/api/scan', async (req, res) => {
     try {
         const { query } = req.body; 
@@ -341,7 +323,6 @@ app.post('/api/scan', async (req, res) => {
         
         console.log(`🔎 Scanning for: ${query}`);
 
-        // Parallel Fetching for speed
         const [rawContent, related, history, tweets] = await Promise.all([
             fetchEliteNews(query),
             getDynamicRelatedEntities(query),
@@ -349,7 +330,7 @@ app.post('/api/scan', async (req, res) => {
             Promise.resolve(getMockTweets(query))
         ]);
         
-        // Basic dedup by URL before sending to AI (save tokens)
+        // Remove duplicate URLs before AI analysis
         const seen = new Set();
         const uniqueContent = rawContent.filter(item => {
             if (seen.has(item.url)) return false;
@@ -357,29 +338,29 @@ app.post('/api/scan', async (req, res) => {
             return true;
         });
         
+        // Fallback if no content found
         if (uniqueContent.length === 0) {
             return res.json({ message: "No data found.", data: [], related, brief: "No recent news found.", tweets });
         }
         
-        // Analyze and Cluster
         const rawResults = await analyzeBatch(uniqueContent, query);
         const clusteredResults = deduplicateResults(rawResults);
         const brief = await generateExecutiveBrief(clusteredResults, query, history);
 
-        console.log(`✅ Scan complete. Found ${clusteredResults.length} unique insights.`);
-        res.json({ message: `Scanned items.`, data: clusteredResults, related, brief, tweets });
-
+        res.json({ message: `Success`, data: clusteredResults, related, brief, tweets });
     } catch (error) { 
-        console.error("🔥 SCAN ERROR:", error);
+        console.error("SCAN ERROR:", error);
         res.status(500).json({ message: "Internal Server Error", data: [] }); 
     }
 });
 
+// Audit Action Endpoint
 app.post('/api/action', (req, res) => {
     auditLog.unshift({ ...req.body, id: Date.now(), timestamp: new Date().toISOString() });
     res.json({ success: true });
 });
 
+// History Endpoint
 app.get('/api/history', (req, res) => res.json(auditLog));
 
 app.listen(PORT, () => console.log(`🚀 Certa Engine running on port ${PORT}`));
