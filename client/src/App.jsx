@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { 
-  LayoutDashboard, History, Settings, Bell, Search, 
-  ExternalLink, Loader2, Globe, X, Shield, Gavel, FileText, Newspaper, Megaphone, CheckCircle2, AlertTriangle, ArrowRight, Sparkles, Bookmark, Plus, Trash2, RefreshCw, Users, ArrowUpRight, Zap, Database, Scale, Globe2, Layers, MessageCircle, Twitter
+  LayoutDashboard, History, Bell, Search, ExternalLink, Loader2, Globe, X, Shield, Gavel, 
+  FileText, Newspaper, Megaphone, CheckCircle2, AlertTriangle, Sparkles, Bookmark, Plus, 
+  Trash2, RefreshCw, Users, ArrowUpRight, Zap, Database, Scale, Globe2, MessageCircle, Twitter 
 } from 'lucide-react';
 import certaLogo from './assets/certa.svg';
 import gavinPic from './assets/gavin.jpg'; 
 
-const API_BASE = 'https://certa-risk-intel.onrender.com/api';
+// --- CONFIGURATION ---
+// ⚠️ IMPORTANT: Replace this with your actual Render URL (keep /api at the end)
+const API_BASE = 'https://certa-api.onrender.com/api';
 
 // --- HELPER COMPONENTS ---
 
@@ -21,7 +24,7 @@ const NavItem = ({ icon: Icon, label, active, onClick }) => (
 );
 
 const RiskScore = ({ score, severity }) => {
-    if (severity === 'None' || score < 10) return null;
+    if (!severity || severity === 'None' || !score) return null;
     
     let colorClass = 'text-emerald-600';
     if (score > 90) colorClass = 'text-red-700'; // Critical
@@ -37,7 +40,7 @@ const RiskScore = ({ score, severity }) => {
 };
 
 const getRiskBadgeStyle = (type) => {
-    const t = type.toLowerCase();
+    const t = (type || '').toLowerCase();
     if (t.includes('fraud') || t.includes('financial')) return 'bg-red-50 text-red-700 border-red-100';
     if (t.includes('litigation') || t.includes('legal')) return 'bg-orange-50 text-orange-700 border-orange-100';
     if (t.includes('environmental') || t.includes('esg')) return 'bg-emerald-50 text-emerald-700 border-emerald-100';
@@ -48,17 +51,18 @@ const getRiskBadgeStyle = (type) => {
 };
 
 const SourceTypeBadge = ({ type }) => {
+    const safeType = type || 'News';
     const styles = { 
         'Legal': 'bg-purple-50 text-purple-700 border-purple-100', 
         'Regulatory': 'bg-blue-50 text-blue-700 border-blue-100', 
         'Blog': 'bg-orange-50 text-orange-700 border-orange-100', 
         'News': 'bg-slate-50 text-slate-600 border-slate-200' 
     };
-    const Icon = { 'Legal': Gavel, 'Regulatory': FileText, 'Blog': Megaphone, 'News': Newspaper }[type] || Newspaper;
+    const Icon = { 'Legal': Gavel, 'Regulatory': FileText, 'Blog': Megaphone, 'News': Newspaper }[safeType] || Newspaper;
     
     return (
-        <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${styles[type] || styles['News']}`}>
-            <Icon className="w-3 h-3" /> {type}
+        <span className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${styles[safeType] || styles['News']}`}>
+            <Icon className="w-3 h-3" /> {safeType}
         </span>
     );
 };
@@ -174,12 +178,15 @@ export default function App() {
         body: JSON.stringify({ query: searchTerm }) 
       });
       const data = await res.json();
-      setResults(data.data || []);
-      setRelatedEntities(data.related || []);
-      setExecutiveBrief(data.brief || '');
-      setTweets(data.tweets || []); // Load Tweets
+      
+      // Safety Checks: Ensure data exists before setting state
+      setResults(data?.data || []);
+      setRelatedEntities(data?.related || []);
+      setExecutiveBrief(data?.brief || '');
+      setTweets(data?.tweets || []); 
     } catch (err) { 
-        alert("Connection Error. Ensure backend is running."); 
+        console.error("Fetch Error:", err);
+        alert("Connection Error. Ensure Render backend is live."); 
     } finally { 
         setLoading(false); 
     }
@@ -191,19 +198,19 @@ export default function App() {
       await fetch(`${API_BASE}/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ articleUrl: selectedItem.url, action: actionType, reason, user: "Gavin Belson", query: query })
+          body: JSON.stringify({ articleUrl: selectedItem?.url, action: actionType, reason, user: "Gavin Belson", query: query })
       });
-      setDecisions(prev => ({ ...prev, [selectedItem.url]: actionType }));
+      setDecisions(prev => ({ ...prev, [selectedItem?.url]: actionType }));
       setModalOpen(false);
   };
 
-  const adverseCount = results.filter(r => r.analysis?.isAdverse).length;
-  const displayResults = activeTab === 'adverse' ? results.filter(r => r.analysis?.isAdverse) : results;
+  const adverseCount = (results || []).filter(r => r?.analysis?.isAdverse).length;
+  const displayResults = activeTab === 'adverse' ? (results || []).filter(r => r?.analysis?.isAdverse) : (results || []);
 
   // --- RENDER LANDING PAGE ---
   if (view === 'landing') {
     return (
-        <div className="min-h-screen bg-slate-50 relative flex flex-col overflow-hidden selection:bg-blue-100">
+        <div className="min-h-screen bg-slate-50 relative flex flex-col items-center justify-center overflow-hidden selection:bg-blue-100">
             <div className="absolute inset-0 z-0 opacity-50" style={{ backgroundImage: 'radial-gradient(#94a3b8 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
             <div className="absolute inset-0 z-0 bg-gradient-to-b from-transparent via-white/70 to-white"></div>
 
@@ -220,7 +227,7 @@ export default function App() {
                  </div>
             </header>
             
-            <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center justify-center min-h-screen px-4 -mt-6">
+            <div className="relative z-10 w-full max-w-3xl mx-auto flex flex-col items-center justify-center px-4 -mt-6">
                 <div className="flex flex-col items-center gap-4 mb-10 text-center animate-fade-in-up">
                      <h1 className="text-5xl md:text-6xl font-black text-slate-900 tracking-tight leading-tight">Strategic Risk <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-sky-500">Intelligence</span></h1>
                      <p className="text-slate-500 text-lg md:text-xl max-w-xl leading-relaxed mt-2 font-medium">AI-powered screening across global news, legal filings, and regulatory databases.</p>
@@ -319,7 +326,7 @@ export default function App() {
                          <p className="text-slate-500 text-sm mt-1">Analyzing legal, regulatory, and news databases for "{query}"</p>
                     </div>
                 )}
-                {!loading && results.length > 0 && (
+                {!loading && (
                 <div className="animate-fade-in-up">
                      
                      {/* EXECUTIVE BRIEF */}
@@ -336,12 +343,12 @@ export default function App() {
                      )}
 
                      <div className="flex items-center gap-4 mb-6">
-                        <div className="px-4 py-2 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center gap-3"><span className="text-[10px] font-bold text-slate-400 uppercase">Total Scanned</span><span className="text-lg font-bold text-slate-900">{results.length}</span></div>
+                        <div className="px-4 py-2 bg-white border border-slate-200 rounded-lg shadow-sm flex items-center gap-3"><span className="text-[10px] font-bold text-slate-400 uppercase">Total Scanned</span><span className="text-lg font-bold text-slate-900">{results?.length || 0}</span></div>
                         <div className="px-4 py-2 bg-white border border-red-100 rounded-lg shadow-sm flex items-center gap-3"><span className="text-[10px] font-bold text-red-400 uppercase">High Risk</span><span className="text-lg font-bold text-red-600">{adverseCount}</span></div>
                     </div>
                     
                     {/* RELATED ENTITIES */}
-                    {relatedEntities.length > 0 && (
+                    {relatedEntities?.length > 0 && (
                         <div className="mb-6 p-4 bg-blue-50 border border-blue-100 rounded-lg flex items-center gap-4">
                             <div className="p-2 bg-white rounded-full border border-blue-100 text-blue-600"><Users className="w-5 h-5" /></div>
                             <div className="flex-1">
@@ -360,43 +367,38 @@ export default function App() {
 
                     <div className="flex items-center gap-6 border-b border-slate-200 mb-6">
                         <button onClick={() => setActiveTab('adverse')} className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${activeTab === 'adverse' ? 'border-red-500 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>Adverse Findings <span className="bg-red-50 text-red-600 px-2 py-0.5 rounded-full text-[10px] font-extrabold border border-red-100">{adverseCount}</span></button>
-                        <button onClick={() => setActiveTab('all')} className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${activeTab === 'all' ? 'border-blue-600 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>All Intelligence <span className="bg-slate-50 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-extrabold border border-slate-100">{results.length}</span></button>
+                        <button onClick={() => setActiveTab('all')} className={`pb-3 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${activeTab === 'all' ? 'border-blue-600 text-slate-900' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>All Intelligence <span className="bg-slate-50 text-slate-600 px-2 py-0.5 rounded-full text-[10px] font-extrabold border border-slate-100">{results?.length || 0}</span></button>
                     </div>
+
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {displayResults.length === 0 && (
+                             <div className="col-span-2 text-center py-10 text-slate-400 text-sm font-medium">No intelligence found for this entity.</div>
+                    )}
                     {displayResults.map((item, idx) => {
-                        const ai = item.analysis || {};
-                        const decision = decisions[item.url];
-                        const isTranslated = ai.sourceLanguage && ai.sourceLanguage !== 'en';
-                        const extraSources = item.relatedSources || [];
+                        const ai = item?.analysis || {};
+                        const decision = decisions[item?.url];
+                        const extraSources = item?.relatedSources || [];
                         
                         return (
                             <div key={idx} className={`bg-white rounded-lg p-5 border transition-all hover:shadow-md ${decision ? 'opacity-50 grayscale border-slate-100' : 'border-slate-200 hover:border-blue-200'}`}>
                             <div className="flex gap-4 items-start h-full">
                                 <div className="flex flex-col items-center gap-2">
-                                    <SourceLogo domain={item.domain} sourceName={item.source} />
-                                    {isTranslated && <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1 rounded uppercase">{ai.sourceLanguage}</span>}
+                                    <SourceLogo domain={item?.domain} sourceName={item?.source} />
                                 </div>
                                 <div className="flex-1 min-w-0 flex flex-col h-full">
                                     <div className="flex items-start justify-between gap-4 mb-2">
-                                        <h3 className="text-sm font-bold text-slate-900 leading-snug hover:text-blue-600 cursor-pointer line-clamp-2"><a href={item.url} target="_blank" rel="noreferrer">{item.title}</a></h3>
+                                        <h3 className="text-sm font-bold text-slate-900 leading-snug hover:text-blue-600 cursor-pointer line-clamp-2"><a href={item?.url} target="_blank" rel="noreferrer">{item?.title}</a></h3>
                                         <ExternalLink className="w-3 h-3 text-slate-300 shrink-0"/>
                                     </div>
                                     <div className="flex items-center gap-2 mb-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
-                                        <SourceTypeBadge type={item.sourceType || 'News'} /><span>•</span><span>{new Date(item.date).toLocaleDateString()}</span>
+                                        <SourceTypeBadge type={item?.sourceType || 'News'} /><span>•</span><span>{item?.date ? new Date(item.date).toLocaleDateString() : 'Recent'}</span>
                                     </div>
-                                    <p className="text-slate-600 text-xs leading-relaxed mb-4 line-clamp-3 flex-1 font-medium">{ai.summary || item.content}</p>
+                                    <p className="text-slate-600 text-xs leading-relaxed mb-4 line-clamp-3 flex-1 font-medium">{ai?.summary || item?.content}</p>
                                     
                                     {/* RELATED SOURCES SECTION */}
-                                    {extraSources.length > 0 && (
+                                    {extraSources?.length > 0 && (
                                         <div className="mb-4 pt-3 border-t border-slate-50">
                                             <div className="flex items-center gap-2 mb-2">
-                                                <div className="flex -space-x-2">
-                                                    {extraSources.slice(0, 3).map((s, i) => (
-                                                        <div key={i} className="w-5 h-5 rounded-full border border-white bg-slate-50 flex items-center justify-center overflow-hidden">
-                                                             <img src={`https://www.google.com/s2/favicons?domain=${s.domain}`} className="w-3 h-3" />
-                                                        </div>
-                                                    ))}
-                                                </div>
                                                 <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full border border-blue-100">
                                                     +{extraSources.length} Verified Sources
                                                 </span>
@@ -413,9 +415,8 @@ export default function App() {
 
                                     <div className="flex items-center justify-between pt-3 border-t border-slate-50 mt-auto">
                                         <div className="flex flex-wrap gap-1.5">
-                                            {/* STATUS & RISK BADGES */}
-                                            {ai.isAdverse ? <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-50 text-red-700 border border-red-100"><AlertTriangle className="w-2.5 h-2.5"/> Risk</span> : <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100"><CheckCircle2 className="w-2.5 h-2.5"/> Safe</span>}
-                                            {ai.riskTypes && ai.riskTypes.slice(0, 2).map(t => (<span key={t} className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${getRiskBadgeStyle(t)}`}>{t}</span>))}
+                                            {ai?.isAdverse ? <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-red-50 text-red-700 border border-red-100"><AlertTriangle className="w-2.5 h-2.5"/> Risk</span> : <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-50 text-emerald-700 border border-emerald-100"><CheckCircle2 className="w-2.5 h-2.5"/> Safe</span>}
+                                            {ai?.riskTypes?.slice(0, 2).map(t => (<span key={t} className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase border ${getRiskBadgeStyle(t)}`}>{t}</span>))}
                                         </div>
                                         {!decision ? (
                                             <div className="flex gap-2">
@@ -427,7 +428,7 @@ export default function App() {
                                         )}
                                     </div>
                                 </div>
-                                <RiskScore score={ai.riskScore || 0} severity={ai.severity} />
+                                <RiskScore score={ai?.riskScore || 0} severity={ai?.severity} />
                             </div>
                             </div>
                         );
@@ -435,7 +436,7 @@ export default function App() {
                     </div>
 
                     {/* LIVE SOCIAL MONITOR */}
-                    {tweets.length > 0 && (
+                    {tweets?.length > 0 && (
                         <div className="mt-8 pt-6 border-t border-slate-200 animate-fade-in-up">
                             <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2"><MessageCircle className="w-4 h-4 text-blue-500"/> Live Social Signal <span className="text-[10px] font-normal text-slate-400 uppercase ml-2 bg-slate-100 px-2 py-0.5 rounded-full">Beta</span></h3>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
