@@ -1,8 +1,0 @@
-{
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://certa-risk-intel-production.up.railway.app/api/:path*"
-    }
-  ]
-}
