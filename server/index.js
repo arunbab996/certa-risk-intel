@@ -10,20 +10,22 @@ const PORT = process.env.PORT || 3001;
 const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey) {
     console.error("❌ FATAL ERROR: OPENAI_API_KEY is missing in .env file.");
-    process.exit(1);
+    // In production, we might want to fail hard, or just log it.
 }
 const openai = new OpenAI({ apiKey: apiKey });
 const NEWS_API_KEY = process.env.NEWS_API_KEY;
 
-// --- 1. FORCE-OPEN CORS MIDDLEWARE ---
+// --- 1. FORCE-OPEN CORS MIDDLEWARE (THE FIX) ---
 // This manually forces the browser to accept requests from ANYWHERE.
-// It is more robust than the standard 'cors' package for prototypes.
 app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*"); 
+    // Allow any origin
+    res.header("Access-Control-Allow-Origin", "*");
+    // Allow these specific methods
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    // Allow these specific headers
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
     
-    // Handle the browser's "Preflight" check instantly
+    // ⚡️ HANDLE PREFLIGHT REQUESTS INSTANTLY
     if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
     }
