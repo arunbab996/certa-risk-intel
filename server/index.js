@@ -5,9 +5,7 @@ const OpenAI = require('openai');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-/* =====================================================
-   🚨 GLOBAL CORS + PREFLIGHT HANDLER (MUST BE FIRST)
-   ===================================================== */
+/* ===== 1. GLOBAL CORS MIDDLEWARE ===== */
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
@@ -19,19 +17,25 @@ app.use((req, res, next) => {
     "Content-Type, Authorization, X-Requested-With"
   );
 
-  // ⚡ Instant preflight response
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-
   next();
 });
 
-/* =====================================================
-   BODY PARSER (ONLY AFTER CORS)
-   ===================================================== */
-app.use(express.json());
+/* ===== 2. EXPLICIT OPTIONS HANDLER (CRITICAL) ===== */
+app.options('*', (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,DELETE,OPTIONS,PATCH"
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, X-Requested-With"
+  );
+  return res.sendStatus(200);
+});
 
+/* ===== 3. BODY PARSER ===== */
+app.use(express.json());
 /* =====================================================
    CONFIGURATION & SAFETY CHECKS
    ===================================================== */
