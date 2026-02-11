@@ -6,7 +6,7 @@ import {
 import certaLogo from './assets/certa.svg';
 import gavinPic from './assets/gavin.jpg'; 
 
-const API_BASE = 'http://localhost:3001/api';
+const API_BASE = 'https://certa-risk-intel.onrender.com/api';
 
 // --- HELPER COMPONENTS ---
 
